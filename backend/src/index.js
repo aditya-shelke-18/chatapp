@@ -30,9 +30,14 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
-// Connect DB then start server
-connectDB().then(() => {
+// Connect DB
+connectDB();
+
+// Local dev server
+if (process.env.NODE_ENV !== "production") {
   server.listen(PORT, () => {
     console.log(`Server URL: http://localhost:${PORT}`);
   });
-});
+}
+
+export default app;
