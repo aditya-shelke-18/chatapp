@@ -26,12 +26,19 @@ app.use(
   })
 );
 
+// Middleware to ensure DB is connected
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    res.status(500).json({ message: "Database connection failed" });
+  }
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
-
-// Connect DB
-connectDB();
 
 // Local dev server
 if (process.env.NODE_ENV !== "production") {
