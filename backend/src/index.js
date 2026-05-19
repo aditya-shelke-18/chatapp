@@ -30,11 +30,9 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
-
-
-// Start server and connect to DB
-server.listen(PORT, () => {
-  console.clear();
-  console.log(`Server URL: http://localhost:${PORT}`);
-  connectDB();
+// Connect DB then start server
+connectDB().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server URL: http://localhost:${PORT}`);
+  });
 });
