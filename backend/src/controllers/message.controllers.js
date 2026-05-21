@@ -128,6 +128,7 @@ export const markSeen = async (req, res) => {
 
 export const addReaction = async (req, res) => {
     try {
+        const { messageId } = req.params;
         const { emoji } = req.body;
         const userId = req.user._id;
 
