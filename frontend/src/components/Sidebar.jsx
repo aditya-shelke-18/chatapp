@@ -60,10 +60,15 @@ const Sidebar = () => {
                 className="object-cover rounded-full size-12"
               />
               {onlineUsers.includes(user._id) && (
-                <span
-                  className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900"
-                />
+                <span className="absolute bottom-0 right-0 bg-green-500 rounded-full size-3 ring-2 ring-zinc-900" />
               )}
+              {!selectedUser || selectedUser._id !== user._id ? (
+                user.unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full size-4 flex items-center justify-center ring-2 ring-zinc-900">
+                    {user.unreadCount > 9 ? "9+" : user.unreadCount}
+                  </span>
+                )
+              ) : null}
             </div>
 
             {/* User info - only visible on larger screens */}

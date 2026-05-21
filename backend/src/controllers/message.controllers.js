@@ -7,7 +7,21 @@ export const getUsersForSidebar = async (req, res) => {
     try {
         const loggedInUserId = req.user._id;
         const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
-        res.status(200).json(filteredUsers);
+
+        const unreadCounts = await Message.aggregate([
+            { $match: { receiverId: loggedInUserId, seen: false } },
+            { $group: { _id: "$senderId", count: { $sum: 1 } } }
+        ]);
+
+        const unreadMap = {};
+        unreadCounts.forEach(({ _id, count }) => { unreadMap[_id.toString()] = count; });
+
+        const usersWithUnread = filteredUsers.map(user => ({
+            ...user.toObject(),
+            unreadCount: unreadMap[user._id.toString()] || 0
+        }));
+
+        res.status(200).json(usersWithUnread);
     }
     catch(err){
         console.log("Error in getting users for sidebar", err.message);
@@ -35,7 +49,7 @@ export const getMessages = async (req, res) => {
 
 export const sendMessages = async (req, res) => {
     try {
-       const { text, image } = req.body;
+       const { text, image, file, fileName, fileType } = req.body;
        const { id:receiverId } = req.params;
        const senderId = req.user._id;
 
@@ -45,17 +59,28 @@ export const sendMessages = async (req, res) => {
             imageUrl = uploadResponse.url;
        }
 
+       let fileUrl;
+       if(file){
+            const uploadResponse = await cloudinary.uploader.upload(file, {
+                resource_type: "auto",
+                public_id: fileName,
+            });
+            fileUrl = uploadResponse.secure_url;
+       }
+
        const newMessage = new Message({
            senderId,
            receiverId,
            text,
-           image:imageUrl,
+           image: imageUrl,
+           file: fileUrl,
+           fileName,
+           fileType,
            reactions: []
        })
 
        await newMessage.save();
 
-    
     const receiverSocketId = getReceiverSocketId(receiverId);
     if(receiverSocketId){
         io.to(receiverSocketId).emit("newMessage", newMessage);
@@ -65,13 +90,23 @@ export const sendMessages = async (req, res) => {
     } catch (error) {
         console.log("Error in sending messages", error.message);
         res.status(500).send({message:"Internal Server Error"})
-        
+    }
+};
+
+export const markSeen = async (req, res) => {
+    try {
+        const { id: senderId } = req.params;
+        const receiverId = req.user._id;
+        await Message.updateMany({ senderId, receiverId, seen: false }, { seen: true });
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.log("Error in markSeen", error.message);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
 export const addReaction = async (req, res) => {
     try {
-        const { messageId } = req.params;
         const { emoji } = req.body;
         const userId = req.user._id;
 

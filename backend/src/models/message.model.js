@@ -18,6 +18,19 @@ const messageSchema = new mongoose.Schema(
     image: {
         type: String,
     },
+    file: {
+        type: String,
+    },
+    fileName: {
+        type: String,
+    },
+    fileType: {
+        type: String,
+    },
+    seen: {
+        type: Boolean,
+        default: false,
+    },
     reactions: [{
         userId: {
             type: mongoose.Schema.Types.ObjectId,

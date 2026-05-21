@@ -7,6 +7,7 @@ import MessageSkeleton from "./skeletons/MessageSkeleton";
 import MessageReactions from "./MessageReactions";
 import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
+import { Paperclip } from "lucide-react";
 
 const ChatContainer = () => {
   const {
@@ -74,11 +75,14 @@ const ChatContainer = () => {
             </div>
             <div className="flex flex-col chat-bubble">
               {message.image && (
-                <img
-                  src={message.image}
-                  alt="Attachment"
-                  className="sm:max-w-[200px] rounded-md mb-2"
-                />
+                <img src={message.image} alt="Attachment" className="sm:max-w-[200px] rounded-md mb-2" />
+              )}
+              {message.file && (
+                <a href={message.file} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-base-200 text-base-content hover:bg-base-300">
+                  <Paperclip className="size-4" />
+                  <span className="text-sm truncate max-w-[160px]">{message.fileName || "File"}</span>
+                </a>
               )}
               {message.text && <p>{message.text}</p>}
               <MessageReactions message={message} />

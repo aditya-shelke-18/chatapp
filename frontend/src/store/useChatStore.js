@@ -27,12 +27,17 @@ export const useChatStore = create((set, get) => ({
     try {
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
+      await axiosInstance.put(`/messages/seen/${userId}`);
+      set(state => ({
+        users: state.users.map(u => u._id === userId ? { ...u, unreadCount: 0 } : u)
+      }));
     } catch (error) {
-      toast.error(error.response.data.message);
+      toast.error(error.response?.data?.message);
     } finally {
       set({ isMessagesLoading: false });
     }
   },
+
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
     try {
@@ -50,17 +55,24 @@ export const useChatStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
 
     socket.on("newMessage", (newMessage) => {
-      const isMessageSentFromSelectedUser = newMessage.senderId === selectedUser._id;
-      if (!isMessageSentFromSelectedUser) return;
-
-      set({
-        messages: [...get().messages, newMessage],
-      });
+      const isFromSelectedUser = newMessage.senderId === selectedUser._id;
+      if (isFromSelectedUser) {
+        set({ messages: [...get().messages, newMessage] });
+        axiosInstance.put(`/messages/seen/${newMessage.senderId}`);
+      } else {
+        set(state => ({
+          users: state.users.map(u =>
+            u._id === newMessage.senderId
+              ? { ...u, unreadCount: (u.unreadCount || 0) + 1 }
+              : u
+          )
+        }));
+      }
     });
 
     socket.on("messageReaction", ({ messageId, reactions }) => {
       set({
-        messages: get().messages.map(msg => 
+        messages: get().messages.map(msg =>
           msg._id === messageId ? { ...msg, reactions } : msg
         )
       });
