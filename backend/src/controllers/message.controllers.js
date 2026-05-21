@@ -93,6 +93,27 @@ export const sendMessages = async (req, res) => {
     }
 };
 
+export const deleteMessage = async (req, res) => {
+    try {
+        const { id: messageId } = req.params;
+        const userId = req.user._id;
+        const message = await Message.findById(messageId);
+        if (!message) return res.status(404).json({ message: "Message not found" });
+        if (message.senderId.toString() !== userId.toString())
+            return res.status(403).json({ message: "Not authorized" });
+        await message.deleteOne();
+        const receiverSocketId = getReceiverSocketId(message.receiverId);
+        const senderSocketId = getReceiverSocketId(message.senderId);
+        [receiverSocketId, senderSocketId].forEach(sid => {
+            if (sid) io.to(sid).emit("messageDeleted", messageId);
+        });
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.log("Error in deleteMessage", error.message);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
 export const markSeen = async (req, res) => {
     try {
         const { id: senderId } = req.params;

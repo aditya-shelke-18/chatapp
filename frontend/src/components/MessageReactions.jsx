@@ -7,53 +7,40 @@ const MessageReactions = ({ message }) => {
 
   const emojis = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 
-  const handleReaction = (emoji) => {
-    addReaction(message._id, emoji);
-  };
+  const getReactionCount = (emoji) => message.reactions?.filter(r => r.emoji === emoji).length || 0;
 
-  const getReactionCount = (emoji) => {
-    return message.reactions?.filter(r => r.emoji === emoji).length || 0;
-  };
+  const hasUserReacted = (emoji) =>
+    message.reactions?.some(r => r.emoji === emoji && r.userId === authUser._id);
 
-  const hasUserReacted = (emoji) => {
-    return message.reactions?.some(r => r.emoji === emoji && r.userId === authUser._id);
-  };
+  const activeReactions = emojis.filter(e => getReactionCount(e) > 0);
 
   return (
-    <div className="flex gap-1 mt-1">
-      {emojis.map((emoji) => {
+    <div className="flex flex-wrap gap-1 mt-1">
+      {activeReactions.map((emoji) => {
         const count = getReactionCount(emoji);
         const userReacted = hasUserReacted(emoji);
-        
-        if (count === 0 && !userReacted) return null;
-        
         return (
           <button
             key={emoji}
-            onClick={() => handleReaction(emoji)}
-            className={`text-xs px-2 py-1 rounded-full border ${
-              userReacted 
-                ? 'bg-blue-100 border-blue-300 text-blue-700' 
+            onClick={() => addReaction(message._id, emoji)}
+            title={userReacted ? "Click to remove" : "Click to react"}
+            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+              userReacted
+                ? 'bg-blue-100 border-blue-300 text-blue-700'
                 : 'bg-gray-100 border-gray-300 hover:bg-gray-200'
             }`}
           >
-            {emoji} {count > 0 && count}
+            {emoji} {count}
           </button>
         );
       })}
-      
+
       <div className="dropdown dropdown-top">
-        <button tabIndex={0} className="text-xs px-2 py-1 rounded-full border bg-gray-100 hover:bg-gray-200">
-          +
-        </button>
-        <div tabIndex={0} className="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-auto">
+        <button tabIndex={0} className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 hover:bg-gray-200">+</button>
+        <div tabIndex={0} className="dropdown-content menu p-2 shadow bg-base-100 rounded-box">
           <div className="flex gap-1">
             {emojis.map((emoji) => (
-              <button
-                key={emoji}
-                onClick={() => handleReaction(emoji)}
-                className="text-lg hover:bg-gray-100 p-1 rounded"
-              >
+              <button key={emoji} onClick={() => addReaction(message._id, emoji)} className="text-lg hover:bg-gray-100 p-1 rounded">
                 {emoji}
               </button>
             ))}

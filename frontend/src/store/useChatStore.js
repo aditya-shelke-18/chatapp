@@ -49,13 +49,16 @@ export const useChatStore = create((set, get) => ({
   },
 
   subscribeToMessages: () => {
-    const { selectedUser } = get();
-    if (!selectedUser) return;
-
     const socket = useAuthStore.getState().socket;
+    if (!socket) return;
+
+    socket.off("newMessage");
+    socket.off("messageReaction");
+    socket.off("messageDeleted");
 
     socket.on("newMessage", (newMessage) => {
-      const isFromSelectedUser = newMessage.senderId === selectedUser._id;
+      const { selectedUser } = get();
+      const isFromSelectedUser = newMessage.senderId === selectedUser?._id;
       if (isFromSelectedUser) {
         set({ messages: [...get().messages, newMessage] });
         axiosInstance.put(`/messages/seen/${newMessage.senderId}`);
@@ -71,11 +74,13 @@ export const useChatStore = create((set, get) => ({
     });
 
     socket.on("messageReaction", ({ messageId, reactions }) => {
-      set({
-        messages: get().messages.map(msg =>
-          msg._id === messageId ? { ...msg, reactions } : msg
-        )
-      });
+      set({ messages: get().messages.map(msg =>
+        msg._id === messageId ? { ...msg, reactions } : msg
+      )});
+    });
+
+    socket.on("messageDeleted", (messageId) => {
+      set({ messages: get().messages.filter(msg => msg._id !== messageId) });
     });
   },
 
@@ -83,6 +88,7 @@ export const useChatStore = create((set, get) => ({
     const socket = useAuthStore.getState().socket;
     socket.off("newMessage");
     socket.off("messageReaction");
+    socket.off("messageDeleted");
   },
 
   addReaction: async (messageId, emoji) => {
@@ -90,6 +96,15 @@ export const useChatStore = create((set, get) => ({
       await axiosInstance.post(`/messages/react/${messageId}`, { emoji });
     } catch (error) {
       toast.error(error.response.data.message);
+    }
+  },
+
+  deleteMessage: async (messageId) => {
+    try {
+      await axiosInstance.delete(`/messages/${messageId}`);
+      set({ messages: get().messages.filter(msg => msg._id !== messageId) });
+    } catch (error) {
+      toast.error(error.response?.data?.message);
     }
   },
 
