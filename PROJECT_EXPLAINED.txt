@@ -1,0 +1,777 @@
+
+================================================================================
+         FULLSTACK CHAT APP - COMPLETE PROJECT EXPLANATION FOR BEGINNERS
+================================================================================
+
+Think of this app like WhatsApp. You log in, see a list of people, click on
+someone, and chat with them in real time. Messages appear instantly without
+refreshing the page.
+
+The project is split into two parts:
+  - BACKEND  → The server. Handles data, database, authentication, real-time.
+  - FRONTEND → The UI. What the user sees and interacts with in the browser.
+
+They talk to each other in two ways:
+  1. HTTP requests  (normal API calls for login, fetching messages, etc.)
+  2. WebSocket      (Socket.io - for real-time instant updates)
+
+================================================================================
+                          HOW DATA FLOWS (BIG PICTURE)
+================================================================================
+
+USER OPENS APP
+    |
+    v
+App.jsx runs checkAuth()
+    |
+    ├── If logged in  → Show HomePage (Sidebar + ChatContainer)
+    └── If not logged in → Redirect to /login
+
+USER LOGS IN
+    |
+    v
+LoginPage → calls login() in useAuthStore
+    |
+    v
+POST /api/auth/login → backend checks password → returns user data + sets JWT cookie
+    |
+    v
+Frontend stores authUser in Zustand state
+    |
+    v
+connectSocket() is called → opens a WebSocket connection to the server
+    |
+    v
+Server registers this user as "online" in userSocketMap
+
+USER OPENS A CHAT
+    |
+    v
+Sidebar → user clicks a contact → setSelectedUser()
+    |
+    v
+ChatContainer → getMessages(userId) is called
+    |
+    v
+GET /api/messages/:id → backend fetches all messages between the two users
+    |
+    v
+Messages displayed on screen
+
+USER SENDS A MESSAGE
+    |
+    v
+MessageInput → handleSendMessage() → sendMessage() in useChatStore
+    |
+    v
+POST /api/messages/send/:id → backend saves message to MongoDB
+    |
+    v
+Backend emits "newMessage" event via Socket.io to the receiver
+    |
+    v
+Receiver's browser gets the event instantly → message appears without refresh
+
+================================================================================
+                              BACKEND EXPLAINED
+================================================================================
+
+------------------------------------------------------------------------
+FILE: backend/src/index.js  (THE ENTRY POINT - Server starts here)
+------------------------------------------------------------------------
+
+This is the first file that runs when you start the backend.
+
+  app.use(express.json({ limit: "10mb" }))
+    → Tells Express to accept JSON data in request bodies.
+    → limit "10mb" allows large files/images to be sent.
+
+  app.use(cookieParser())
+    → Allows the server to read cookies from requests.
+    → We use cookies to store the JWT login token.
+    → CORS = Cross-Origin Resource Sharing.
+    → The frontend (localhost:5173) and backend (localhost:5001) are on
+      different ports, so we must explicitly allow them to talk.
+    → credentials: true allows cookies to be sent cross-origin.
+
+  app.use(async (req, res, next) => { await connectDB(); next(); })
+    → Before every request, make sure the database is connected.
+    → next() means "continue to the actual route handler".
+    → This is important for serverless (Vercel) where DB may not be
+      connected between requests.
+ 
+  app.use("/api/auth", authRoutes)
+    → All routes starting with /api/auth go to auth.route.js
+
+  app.use("/api/messages", messageRoutes)
+    → All routes starting with /api/messages go to message.route.js
+
+  export default app
+    → Exports the app for Vercel serverless deployment.
+
+------------------------------------------------------------------------
+FILE: backend/src/lib/db.js  (DATABASE CONNECTION)
+------------------------------------------------------------------------
+
+  let isConnected = false
+    → A flag to avoid creating multiple database connections.
+    → On serverless (Vercel), this function can be called many times.
+    → We only connect once and reuse the connection.
+
+  mongoose.connect(process.env.MONGODB_URI)
+    → Connects to MongoDB Atlas using the URI from .env file.
+    → Mongoose is a library that makes working with MongoDB easier.
+
+------------------------------------------------------------------------
+FILE: backend/src/lib/socker.js  (REAL-TIME WITH SOCKET.IO)
+------------------------------------------------------------------------
+
+This file sets up the real-time communication system.
+
+  const app = express()
+  const server = http.createServer(app)
+    → We create an HTTP server manually so Socket.io can attach to it.
+    → Socket.io needs the raw HTTP server, not just Express.
+
+  const io = new Server(server, { cors: {...} })
+    → Creates the Socket.io server.
+    → io is the object we use to send real-time events.
+
+  const userSocketMap = {}
+    → An object that maps userId → socketId.
+    → Example: { "abc123": "socket_xyz", "def456": "socket_uvw" }
+    → When user "abc123" connects, we store their socket ID here.
+    → This lets us send a message directly to a specific user.
+
+  io.on("connection", (socket) => { ... })
+    → This runs every time a user opens the app and connects.
+    → socket = the individual connection for that one user.
+
+  socket.handshake.query.userId
+    → When the frontend connects, it sends the userId as a query param.
+    → We use this to know which user this socket belongs to.
+
+  io.emit("getOnlineUsers", Object.keys(userSocketMap))
+    → Broadcasts to ALL connected users the list of online user IDs.
+    → Every time someone connects or disconnects, everyone gets updated.
+
+  socket.on("disconnect", () => { ... })
+    → Runs when a user closes the browser or loses connection.
+    → We remove them from userSocketMap and update everyone.
+
+  getReceiverSocketId(userId)
+    → A helper function. Given a userId, returns their socket ID.
+    → Used to send a message to a specific person.
+
+------------------------------------------------------------------------
+FILE: backend/src/lib/utils.js  (JWT TOKEN HELPER)
+------------------------------------------------------------------------
+
+  generateToken(userId, res)
+    → Creates a JWT (JSON Web Token) - think of it as a digital ID card.
+    → The token contains the userId and is signed with JWT_SECRET.
+    → It's stored in an HTTP-only cookie (browser stores it automatically).
+    → httpOnly: true → JavaScript cannot read this cookie (security).
+    → sameSite: "none" in production → allows cross-origin cookies.
+    → secure: true → cookie only sent over HTTPS.
+    → maxAge: 7 days → user stays logged in for 7 days.
+
+------------------------------------------------------------------------
+FILE: backend/src/middleware/auth.middleware.js  (ROUTE PROTECTION)
+------------------------------------------------------------------------
+
+  protectRoute
+    → A middleware function that runs BEFORE protected route handlers.
+    → It checks if the user is logged in before allowing access.
+
+  How it works:
+    1. Read the "jwt" cookie from the request.
+    2. If no cookie → return 401 Unauthorized.
+    3. Verify the token using JWT_SECRET.
+    4. Find the user in the database using the userId from the token.
+    5. Attach the user to req.user so route handlers can use it.
+    6. Call next() to continue to the actual route handler.
+
+  Example: GET /api/messages/users
+    → protectRoute runs first → checks cookie → finds user → next()
+    → getUsersForSidebar runs → uses req.user._id
+
+------------------------------------------------------------------------
+FILE: backend/src/models/user.model.js  (USER DATABASE SCHEMA)
+------------------------------------------------------------------------
+
+Defines the structure of a User document in MongoDB.
+
+  Fields:
+    email      → String, required, unique (no two users same email)
+    fullName   → String, required
+    password   → String, required (stored as bcrypt hash, never plain text)
+    profilePic → String (URL to image, default empty)
+    createdAt  → Auto-added by timestamps: true
+    updatedAt  → Auto-added by timestamps: true
+
+------------------------------------------------------------------------
+FILE: backend/src/models/message.model.js  (MESSAGE DATABASE SCHEMA)
+------------------------------------------------------------------------
+
+Defines the structure of a Message document in MongoDB.
+
+  Fields:
+    senderId   → ObjectId referencing a User (who sent it)
+    receiverId → ObjectId referencing a User (who receives it)
+    text       → String (the message text, optional)
+    image      → String (Cloudinary URL for image, optional)
+    file       → String (Cloudinary URL for file, optional)
+    fileName   → String (original file name)
+    fileType   → String (e.g. "application/pdf")
+    seen       → Boolean, default false (has receiver seen this message?)
+    reactions  → Array of { userId, emoji } objects
+    createdAt  → Auto-added
+    updatedAt  → Auto-added
+
+------------------------------------------------------------------------
+FILE: backend/src/controllers/auth.controller.js  (AUTH LOGIC)
+------------------------------------------------------------------------
+
+  signup(req, res)
+    → Receives { fullName, email, password } from request body.
+    → Validates all fields are present and password >= 6 chars.
+    → Checks if email already exists in DB.
+    → Hashes the password using bcrypt (never store plain passwords!).
+    → Creates new User in MongoDB.
+    → Calls generateToken() to set the JWT cookie.
+    → Returns user data (without password) to frontend.
+
+  login(req, res)
+    → Receives { email, password }.
+    → Finds user by email in DB.
+    → Uses bcrypt.compare() to check if password matches the hash.
+    → If correct, calls generateToken() and returns user data.
+
+  logout(req, res)
+    → Clears the JWT cookie by setting maxAge to 0.
+
+  checkAuth(req, res)
+    → Protected route (protectRoute middleware runs first).
+    → Simply returns req.user (the logged-in user's data).
+    → Frontend calls this on app load to check if still logged in.
+
+  updateProfile(req, res)
+    → Receives a base64 image string.
+    → Uploads it to Cloudinary (image hosting service).
+    → Updates the user's profilePic URL in MongoDB.
+
+------------------------------------------------------------------------
+FILE: backend/src/controllers/message.controllers.js  (MESSAGE LOGIC)
+------------------------------------------------------------------------
+
+  getUsersForSidebar(req, res)
+    → Returns all users except the logged-in user.
+    → Also calculates unreadCount for each user:
+        - Uses MongoDB aggregation to count unseen messages
+          where receiverId = logged-in user and seen = false.
+        - Groups by senderId to get count per sender.
+    → Returns users array with unreadCount attached to each.
+
+  getMessages(req, res)
+    → Receives the other user's ID from URL params.
+    → Finds all messages where:
+        (sender=me AND receiver=them) OR (sender=them AND receiver=me)
+    → Returns the full conversation.
+
+  sendMessages(req, res)
+    → Receives { text, image, file, fileName, fileType }.
+    → If image provided: uploads base64 to Cloudinary, gets URL.
+    → If file provided: uploads to Cloudinary with resource_type "auto".
+    → Creates and saves new Message in MongoDB.
+    → Finds receiver's socket ID using getReceiverSocketId().
+    → Emits "newMessage" event to receiver via Socket.io.
+    → Returns the saved message to sender.
+
+  deleteMessage(req, res)
+    → Finds message by ID.
+    → Checks if the requester is the sender (only sender can delete).
+    → Deletes the message from MongoDB.
+    → Emits "messageDeleted" event to both sender and receiver sockets.
+
+  markSeen(req, res)
+    → Updates all messages from a specific sender to seen: true.
+    → Called when you open a conversation.
+
+  addReaction(req, res)
+    → Finds the message by ID.
+    → Checks if user already reacted:
+        - Same emoji → remove the reaction (toggle off).
+        - Different emoji → update to new emoji.
+        - No reaction → add new reaction.
+    → Saves updated message.
+    → Emits "messageReaction" event to both users via Socket.io.
+
+================================================================================
+                              FRONTEND EXPLAINED
+================================================================================
+
+------------------------------------------------------------------------
+FILE: frontend/src/lib/axios.js  (HTTP CLIENT SETUP)
+------------------------------------------------------------------------
+
+  axiosInstance
+    → A pre-configured axios client (axios = library for HTTP requests).
+    → baseURL: In development → "http://localhost:5001/api"
+               In production  → "/_/backend/api" (Vercel routing)
+    → withCredentials: true → sends cookies with every request.
+    → Instead of writing the full URL every time, we just write:
+        axiosInstance.get("/auth/check")
+      and it becomes:
+        GET http://localhost:5001/api/auth/check
+
+------------------------------------------------------------------------
+FILE: frontend/src/store/useAuthStore.js  (AUTHENTICATION STATE)
+------------------------------------------------------------------------
+
+This is a Zustand store. Think of Zustand as a global variable that any
+component can read and update. No need to pass props through many components.
+
+  STATE (data stored):
+    authUser        → The logged-in user object, or null if not logged in.
+    isSigningUp     → true while signup API call is in progress.
+    isLoggingIn     → true while login API call is in progress.
+    isUpdatingProfile → true while profile update is in progress.
+    isCheckingAuth  → true while checking if user is logged in on app load.
+    onlineUsers     → Array of user IDs who are currently online.
+    socket          → The Socket.io connection object.
+
+  ACTIONS (functions):
+
+  checkAuth()
+    → Called once when the app loads (in App.jsx useEffect).
+    → Calls GET /api/auth/check to see if the JWT cookie is valid.
+    → If valid: sets authUser and connects socket.
+    → If not: sets authUser to null (user needs to log in).
+
+  signup(data)
+    → Calls POST /api/auth/signup with { fullName, email, password }.
+    → On success: sets authUser, shows success toast, connects socket.
+    → On error: shows error toast.
+
+  login(data)
+    → Calls POST /api/auth/login with { email, password }.
+    → On success: sets authUser, shows success toast, connects socket.
+
+  logout()
+    → Calls POST /api/auth/logout (clears cookie on server).
+    → Sets authUser to null, disconnects socket.
+
+  updateProfile(data)
+    → Calls PUT /api/auth/update-profile with base64 image.
+    → Updates authUser with new profile pic URL.
+
+  connectSocket()
+    → Creates a Socket.io connection to the backend server.
+    → Passes userId as a query parameter so server knows who connected.
+    → Listens for "getOnlineUsers" event → updates onlineUsers state.
+    → Guard: if already connected, does nothing (prevents duplicates).
+
+  disconnectSocket()
+    → Closes the Socket.io connection.
+    → Called on logout.
+
+------------------------------------------------------------------------
+FILE: frontend/src/store/useChatStore.js  (CHAT STATE)
+------------------------------------------------------------------------
+
+  STATE:
+    messages        → Array of message objects for the current conversation.
+    users           → Array of all other users (for the sidebar list).
+    selectedUser    → The user you are currently chatting with.
+    isUsersLoading  → true while fetching users list.
+    isMessagesLoading → true while fetching messages.
+
+  ACTIONS:
+
+  getUsers()
+    → Calls GET /api/messages/users.
+    → Sets users array (each user has unreadCount attached).
+
+  getMessages(userId)
+    → Calls GET /api/messages/:userId to fetch conversation.
+    → Sets messages array.
+    → Also calls PUT /api/messages/seen/:userId to mark messages as read.
+    → Resets unreadCount to 0 for that user in the users array.
+
+  sendMessage(messageData)
+    → Calls POST /api/messages/send/:selectedUserId.
+    → messageData = { text, image, file, fileName, fileType }.
+    → Appends the new message to the messages array immediately.
+
+  subscribeToMessages()
+    → Sets up Socket.io event listeners for real-time updates.
+    → Clears old listeners first (socket.off) to avoid duplicates.
+
+    "newMessage" event:
+      → If message is from the currently open chat:
+          - Add it to messages array.
+          - Mark it as seen immediately.
+      → If message is from someone else:
+          - Increment their unreadCount in the users array.
+          - (Shows red badge on their avatar in sidebar)
+
+    "messageReaction" event:
+      → Updates the reactions array on the specific message.
+
+    "messageDeleted" event:
+      → Removes the message from the messages array.
+
+  unsubscribeFromMessages()
+    → Removes all Socket.io event listeners.
+    → Called when you close a chat or component unmounts.
+    → Important to prevent memory leaks and duplicate handlers.
+
+  addReaction(messageId, emoji)
+    → Calls POST /api/messages/react/:messageId with { emoji }.
+    → The actual UI update happens via the "messageReaction" socket event.
+
+  deleteMessage(messageId)
+    → Calls DELETE /api/messages/:messageId.
+    → Removes message from local state immediately.
+    → Also broadcasts via socket so receiver's screen updates too.
+
+  setSelectedUser(user)
+    → Simply sets the selectedUser state.
+    → Triggers ChatContainer to load that user's messages.
+
+------------------------------------------------------------------------
+FILE: frontend/src/store/useThemeStore.js  (THEME STATE)
+------------------------------------------------------------------------
+
+  theme
+    → The current UI theme (e.g. "coffee", "dark", "light").
+    → Loaded from localStorage so it persists after page refresh.
+
+  setTheme(theme)
+    → Saves theme to localStorage.
+    → Updates theme state → DaisyUI applies the theme via data-theme attribute.
+
+------------------------------------------------------------------------
+FILE: frontend/src/App.jsx  (ROOT COMPONENT - App starts here)
+------------------------------------------------------------------------
+
+  useEffect(() => { checkAuth() }, [checkAuth])
+    → Runs once when the app first loads.
+    → Checks if the user is already logged in (has valid cookie).
+
+  isCheckingAuth
+    → While checking, show a spinning loader.
+    → Prevents the login page from flashing before we know auth status.
+
+  Routes:
+    /          → HomePage (only if logged in, else redirect to /login)
+    /signup    → SignUpPage (only if NOT logged in, else redirect to /)
+    /login     → LoginPage (only if NOT logged in, else redirect to /)
+    /settings  → SettingsPage (always accessible)
+    /profile   → ProfilePage (only if logged in)
+
+  data-theme={theme}
+    → Applies the DaisyUI theme to the entire app.
+
+------------------------------------------------------------------------
+FILE: frontend/src/components/Navbar.jsx
+------------------------------------------------------------------------
+
+  Simple top navigation bar.
+  Shows: App logo, Settings link, Profile link, Logout button.
+  Logout button calls logout() from useAuthStore.
+  Profile and Logout only shown if authUser is not null.
+
+------------------------------------------------------------------------
+FILE: frontend/src/components/Sidebar.jsx
+------------------------------------------------------------------------
+
+  STATE:
+    showOnlineOnly  → Local state (useState). true/false toggle.
+
+  On mount (useEffect):
+    → Calls getUsers() to fetch all users with unread counts.
+
+  filteredUsers
+    → If showOnlineOnly is true: filter users to only those in onlineUsers.
+    → Otherwise: show all users.
+
+  For each user in the list:
+    → Shows profile picture.
+    → Green dot (bottom-right of avatar) if user is in onlineUsers array.
+    → Red badge (top-right of avatar) showing unreadCount if > 0.
+      Only shown when that user is NOT the currently selected user.
+    → Clicking a user calls setSelectedUser(user).
+    → Selected user gets highlighted background.
+
+------------------------------------------------------------------------
+FILE: frontend/src/components/ChatContainer.jsx
+------------------------------------------------------------------------
+
+  useEffect (on selectedUser change):
+    → Calls getMessages(selectedUser._id) to load conversation.
+    → Calls subscribeToMessages() to start listening for real-time events.
+    → Returns cleanup function: unsubscribeFromMessages() when component
+      unmounts or selected user changes.
+
+  useEffect (on socket change):
+    → Re-subscribes to messages when socket reconnects.
+    → Handles cases where socket was not ready on first render.
+
+  useEffect (on messages change):
+    → Scrolls to the bottom of the chat (messageEndRef.scrollIntoView).
+
+  For each message:
+    → chat-end class if message.senderId === authUser._id (your message, right side)
+    → chat-start class if it's from the other person (left side)
+    → Shows profile picture of sender.
+    → Shows timestamp.
+    → Shows image if message.image exists.
+    → Shows file link with paperclip icon if message.file exists.
+    → Shows text if message.text exists.
+    → Shows MessageReactions component.
+    → Shows trash icon button on hover (only for your own messages).
+      Clicking it calls deleteMessage(message._id).
+
+------------------------------------------------------------------------
+FILE: frontend/src/components/MessageInput.jsx
+------------------------------------------------------------------------
+
+  STATE:
+    text          → The current text typed in the input box.
+    imagePreview  → Base64 string of selected image (for preview).
+    filePreview   → Object { name, type, data } for selected file.
+
+  REFS:
+    fileInputRef    → Points to the hidden <input type="file" accept="image/*">
+    anyFileInputRef → Points to the hidden <input type="file" accept="*">
+    (Refs let us programmatically click hidden file inputs)
+
+  handleImageChange(e)
+    → Gets the selected file from the input.
+    → Validates it's an image type.
+    → Uses FileReader to convert file to base64 string.
+    → Sets imagePreview state → shows preview thumbnail.
+
+  handleFileChange(e)
+    → Gets the selected file.
+    → Validates size is under 10MB.
+    → Uses FileReader to convert to base64.
+    → Sets filePreview state → shows file name preview.
+
+  removeImage() / removeFile()
+    → Clears the preview state.
+    → Resets the file input value so same file can be selected again.
+
+  handleSendMessage(e)
+    → Prevents default form submission (page reload).
+    → Guards: does nothing if no text, image, or file.
+    → Calls sendMessage() with all data.
+    → Clears all state after sending.
+
+  UI:
+    → Image preview thumbnail with X button to remove.
+    → File name preview bar with X button to remove.
+    → Text input field.
+    → Image button (camera icon) → opens image file picker.
+    → Paperclip button → opens any file picker.
+    → Send button (disabled if nothing to send).
+
+------------------------------------------------------------------------
+FILE: frontend/src/components/MessageReactions.jsx
+------------------------------------------------------------------------
+
+  emojis array
+    → The 6 available reaction emojis: 👍 ❤️ 😂 😮 😢 😡
+
+  getReactionCount(emoji)
+    → Counts how many people reacted with this emoji on this message.
+
+  hasUserReacted(emoji)
+    → Returns true if the logged-in user reacted with this emoji.
+
+  activeReactions
+    → Only emojis that have at least 1 reaction (don't show empty ones).
+
+  For each active reaction:
+    → Shows emoji + count.
+    → Blue highlight if current user reacted with it.
+    → Clicking it calls addReaction() → toggles (adds or removes).
+    → Tooltip: "Click to remove" or "Click to react".
+
+  "+" button (dropdown):
+    → Shows all 6 emojis to pick from.
+    → Clicking any calls addReaction().
+
+================================================================================
+                         REAL-TIME FLOW EXPLAINED STEP BY STEP
+================================================================================
+
+SCENARIO: User A sends a message to User B
+
+1. User A types "Hello" and clicks Send.
+
+2. MessageInput.handleSendMessage() runs.
+
+3. useChatStore.sendMessage() is called with { text: "Hello" }.
+
+4. Frontend sends: POST /api/messages/send/[UserB_ID]
+   Body: { text: "Hello" }
+
+5. Backend sendMessages() controller runs:
+   a. Creates new Message in MongoDB.
+   b. Looks up User B's socket ID: getReceiverSocketId(UserB_ID)
+   c. Emits to User B's socket: io.to(socketId).emit("newMessage", message)
+   d. Returns the saved message to User A.
+
+6. User A's frontend receives the response:
+   → Appends message to messages array → appears on screen immediately.
+
+7. User B's frontend receives the "newMessage" socket event:
+   → subscribeToMessages listener fires.
+   → If User B has User A's chat open:
+       - Message added to messages array → appears instantly.
+       - PUT /api/messages/seen/[UserA_ID] called → marks as seen.
+   → If User B is in a different chat:
+       - User A's unreadCount incremented by 1.
+       - Red badge appears on User A's avatar in User B's sidebar.
+
+================================================================================
+                              KEY CONCEPTS SUMMARY
+================================================================================
+
+JWT (JSON Web Token)
+  → A secure way to prove who you are without sending password every time.
+  → Stored in a cookie. Server verifies it on every protected request.
+
+bcrypt
+  → A hashing algorithm. Converts "mypassword" → "$2b$10$xyz..."
+  → One-way: you can't reverse it. To check, you hash again and compare.
+
+Zustand
+  → Global state management for React.
+  → Like useState but shared across all components.
+  → create((set, get) => ({ ... })) defines state and actions.
+  → set() updates state. get() reads current state inside actions.
+
+Socket.io
+  → Enables real-time bidirectional communication.
+  → Server can PUSH data to clients without client asking.
+  → io.emit() → send to ALL connected clients.
+  → io.to(socketId).emit() → send to ONE specific client.
+  → socket.on("event", handler) → listen for an event.
+
+useEffect (React Hook)
+  → Runs code after the component renders.
+  → useEffect(() => { ... }, [dependency]) runs when dependency changes.
+  → useEffect(() => { ... }, []) runs only once on mount.
+  → Return a cleanup function to run when component unmounts.
+
+useState (React Hook)
+  → Local state for a single component.
+  → const [value, setValue] = useState(initialValue)
+  → Calling setValue() re-renders the component with new value.
+
+useRef (React Hook)
+  → Holds a reference to a DOM element or a value that doesn't cause re-render.
+  → fileInputRef.current → the actual <input> DOM element.
+  → Used to programmatically click hidden file inputs.
+
+Middleware (Express)
+  → A function that runs between receiving a request and sending a response.
+  → app.use(fn) → runs for every request.
+  → next() → passes control to the next middleware or route handler.
+  → protectRoute is a middleware that checks authentication.
+
+Cloudinary
+  → A cloud service for storing images and files.
+  → We send base64 encoded files → Cloudinary stores them → returns a URL.
+  → We save that URL in MongoDB instead of storing files on our server.
+
+Base64
+  → A way to encode binary files (images, PDFs) as text strings.
+  → FileReader.readAsDataURL() converts a file to base64.
+  → Starts with "data:image/jpeg;base64,/9j/4AAQ..."
+  → We send this string in the JSON request body to the backend.
+
+MongoDB Aggregation ($match, $group)
+  → A powerful way to process and analyze data in MongoDB.
+  → $match → filter documents (like WHERE in SQL).
+  → $group → group documents and calculate values (like GROUP BY in SQL).
+  → Used in getUsersForSidebar to count unread messages per sender.
+
+================================================================================
+                              FILE STRUCTURE SUMMARY
+================================================================================
+
+backend/
+  src/
+    index.js              → Server entry point, middleware setup, routes
+    lib/
+      db.js               → MongoDB connection with caching
+      socker.js           → Socket.io setup, online users tracking
+      utils.js            → JWT token generation helper
+      cloudinary.js       → Cloudinary configuration
+    middleware/
+      auth.middleware.js  → protectRoute - checks JWT before protected routes
+    models/
+      user.model.js       → MongoDB User schema
+      message.model.js    → MongoDB Message schema
+    controllers/
+      auth.controller.js     → signup, login, logout, checkAuth, updateProfile
+      message.controllers.js → getUsers, getMessages, sendMessages,
+                               deleteMessage, markSeen, addReaction
+    routes/
+      auth.route.js       → Maps URLs to auth controller functions
+      message.route.js    → Maps URLs to message controller functions
+    seeds/
+      user.seed.js        → Script to populate DB with test users
+
+frontend/
+  src/
+    App.jsx               → Root component, routing, auth check on load
+    main.jsx              → React entry point, renders App into DOM
+    lib/
+      axios.js            → Pre-configured HTTP client
+      utils.js            → Helper functions (e.g. formatMessageTime)
+    store/
+      useAuthStore.js     → Global auth state (user, socket, online users)
+      useChatStore.js     → Global chat state (messages, users, real-time)
+      useThemeStore.js    → Global theme state
+    components/
+      Navbar.jsx          → Top navigation bar
+      Sidebar.jsx         → Left panel with user list and unread badges
+      ChatContainer.jsx   → Main chat area with messages
+      MessageInput.jsx    → Text input, image/file upload, send button
+      MessageReactions.jsx → Emoji reactions on messages
+      ChatHeader.jsx      → Top of chat showing selected user info
+      NoChatSelected.jsx  → Placeholder when no chat is open
+      skeletons/          → Loading placeholder animations
+    pages/
+      HomePage.jsx        → Main page: Sidebar + ChatContainer
+      LoginPage.jsx       → Login form
+      SignUpPage.jsx       → Signup form
+      ProfilePage.jsx     → View/update profile picture
+      SettingsPage.jsx    → Theme selector
+
+================================================================================
+                              API ENDPOINTS REFERENCE
+================================================================================
+
+AUTH ROUTES (no authentication required except checkAuth and updateProfile):
+  POST   /api/auth/signup          → Create new account
+  POST   /api/auth/login           → Login
+  POST   /api/auth/logout          → Logout (clears cookie)
+  GET    /api/auth/check           → Check if logged in (protected)
+  PUT    /api/auth/update-profile  → Update profile picture (protected)
+
+MESSAGE ROUTES (all protected - require valid JWT cookie):
+  GET    /api/messages/users          → Get all users with unread counts
+  GET    /api/messages/:id            → Get conversation with user :id
+  POST   /api/messages/send/:id       → Send message to user :id
+  POST   /api/messages/react/:msgId   → Add/remove reaction on a message
+  PUT    /api/messages/seen/:id       → Mark messages from user :id as seen
+  DELETE /api/messages/:id            → Delete a message by its ID
+
+================================================================================

@@ -7,6 +7,7 @@ import MessageReactions from "./MessageReactions";
 import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import { Paperclip, Trash2 } from "lucide-react";
+import SmartReply from "./SmartReply";
 
 const ChatContainer = () => {
   const {
@@ -97,6 +98,7 @@ const ChatContainer = () => {
         ))}
       </div>
 
+      <SmartReply />
       <MessageInput />
     </div>
   );

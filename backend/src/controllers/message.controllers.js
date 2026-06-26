@@ -2,6 +2,7 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socker.js";
+import openai from "../lib/openai.js";
 
 export const getUsersForSidebar = async (req, res) => {
     try {
@@ -84,6 +85,8 @@ export const sendMessages = async (req, res) => {
     const receiverSocketId = getReceiverSocketId(receiverId);
     if(receiverSocketId){
         io.to(receiverSocketId).emit("newMessage", newMessage);
+        // Generate smart replies only if receiver is online and message has text
+        if (newMessage.text) generateAndEmitSmartReplies(newMessage, receiverSocketId);
     }
 
         res.status(201).json(newMessage);
@@ -111,6 +114,34 @@ export const deleteMessage = async (req, res) => {
     } catch (error) {
         console.log("Error in deleteMessage", error.message);
         res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+const generateAndEmitSmartReplies = async (message, receiverSocketId) => {
+    try {
+        const lastMessages = await Message.find({
+            $or: [
+                { senderId: message.senderId, receiverId: message.receiverId },
+                { senderId: message.receiverId, receiverId: message.senderId }
+            ]
+        }).sort({ createdAt: -1 }).limit(10);
+
+        const conversation = lastMessages.reverse()
+            .map(msg => `${msg.senderId}: ${msg.text || "[media]"}`)
+            .join("\n");
+
+        const prompt = `Conversation:\n${conversation}\n\nLatest message: "${message.text}"\n\nGenerate exactly 3 short reply suggestions for 3 tones: Professional, Friendly, Short.\nReturn only valid JSON:\n{"replies":[{"tone":"Professional","text":"..."},{"tone":"Friendly","text":"..."},{"tone":"Short","text":"..."}]}`;
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+        });
+
+        const { replies } = JSON.parse(completion.choices[0].message.content);
+        io.to(receiverSocketId).emit("smartReplies", { messageId: message._id, replies });
+    } catch (error) {
+        console.log("Error generating smart replies:", error.message);
     }
 };
 

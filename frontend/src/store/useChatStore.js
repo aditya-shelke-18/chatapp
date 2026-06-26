@@ -2,6 +2,7 @@ import { create } from "zustand";
 import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
+import { showNotification } from "../lib/notification";
 
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -9,6 +10,7 @@ export const useChatStore = create((set, get) => ({
   selectedUser: null,
   isUsersLoading: false,
   isMessagesLoading: false,
+  smartReplies: [],
 
   getUsers: async () => {
     set({ isUsersLoading: true });
@@ -23,7 +25,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   getMessages: async (userId) => {
-    set({ isMessagesLoading: true });
+    set({ isMessagesLoading: true, smartReplies: [] });
     try {
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
@@ -42,7 +44,7 @@ export const useChatStore = create((set, get) => ({
     const { selectedUser, messages } = get();
     try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
-      set({ messages: [...messages, res.data] });
+      set({ messages: [...messages, res.data], smartReplies: [] });
     } catch (error) {
       toast.error(error.response.data.message);
     }
@@ -63,6 +65,11 @@ export const useChatStore = create((set, get) => ({
         set({ messages: [...get().messages, newMessage] });
         axiosInstance.put(`/messages/seen/${newMessage.senderId}`);
       } else {
+        // find sender name from users list
+        const sender = get().users.find(u => u._id === newMessage.senderId);
+        const senderName = sender?.fullName || "Someone";
+        const body = newMessage.text || (newMessage.image ? "Sent an image" : "Sent a file");
+        showNotification(senderName, body, sender?.profilePic || "/avatar.png");
         set(state => ({
           users: state.users.map(u =>
             u._id === newMessage.senderId
@@ -82,6 +89,13 @@ export const useChatStore = create((set, get) => ({
     socket.on("messageDeleted", (messageId) => {
       set({ messages: get().messages.filter(msg => msg._id !== messageId) });
     });
+
+    socket.on("smartReplies", ({ messageId, replies }) => {
+      const { messages } = get();
+      const lastMsg = messages[messages.length - 1];
+      if (!lastMsg || lastMsg._id === messageId || true)
+        set({ smartReplies: replies });
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -89,6 +103,7 @@ export const useChatStore = create((set, get) => ({
     socket.off("newMessage");
     socket.off("messageReaction");
     socket.off("messageDeleted");
+    socket.off("smartReplies");
   },
 
   addReaction: async (messageId, emoji) => {
