@@ -119,6 +119,11 @@ export const deleteMessage = async (req, res) => {
 
 const generateAndEmitSmartReplies = async (message, receiverSocketId) => {
     try {
+        if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "your_openai_api_key_here") {
+            console.log("Smart replies skipped: OPENAI_API_KEY not configured");
+            return;
+        }
+
         const lastMessages = await Message.find({
             $or: [
                 { senderId: message.senderId, receiverId: message.receiverId },
@@ -130,16 +135,36 @@ const generateAndEmitSmartReplies = async (message, receiverSocketId) => {
             .map(msg => `${msg.senderId}: ${msg.text || "[media]"}`)
             .join("\n");
 
-        const prompt = `Conversation:\n${conversation}\n\nLatest message: "${message.text}"\n\nGenerate exactly 3 short reply suggestions for 3 tones: Professional, Friendly, Short.\nReturn only valid JSON:\n{"replies":[{"tone":"Professional","text":"..."},{"tone":"Friendly","text":"..."},{"tone":"Short","text":"..."}]}`;
+        const prompt = `You are a smart reply assistant for a chat app.
+
+Recent conversation:
+${conversation}
+
+The latest message received is: "${message.text}"
+
+Generate exactly 3 short reply suggestions with different tones.
+Rules:
+- Each reply must be under 12 words
+- Replies must be natural and contextually relevant
+- Tones: Professional, Friendly, Short
+
+Return ONLY valid JSON in this exact format:
+{"replies":[{"tone":"Professional","text":"..."},{"tone":"Friendly","text":"..."},{"tone":"Short","text":"..."}]}`;
 
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [{ role: "user", content: prompt }],
             response_format: { type: "json_object" },
+            max_tokens: 200,
+            temperature: 0.7,
         });
 
-        const { replies } = JSON.parse(completion.choices[0].message.content);
-        io.to(receiverSocketId).emit("smartReplies", { messageId: message._id, replies });
+        const parsed = JSON.parse(completion.choices[0].message.content);
+        const replies = parsed.replies;
+
+        if (!Array.isArray(replies) || replies.length === 0) return;
+
+        io.to(receiverSocketId).emit("smartReplies", { messageId: message._id.toString(), replies });
     } catch (error) {
         console.log("Error generating smart replies:", error.message);
     }

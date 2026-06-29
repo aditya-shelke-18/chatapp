@@ -11,6 +11,7 @@ export const useChatStore = create((set, get) => ({
   isUsersLoading: false,
   isMessagesLoading: false,
   smartReplies: [],
+  isGeneratingReplies: false,
 
   getUsers: async () => {
     set({ isUsersLoading: true });
@@ -25,7 +26,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   getMessages: async (userId) => {
-    set({ isMessagesLoading: true, smartReplies: [] });
+    set({ isMessagesLoading: true, smartReplies: [], isGeneratingReplies: false });
     try {
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
@@ -44,7 +45,7 @@ export const useChatStore = create((set, get) => ({
     const { selectedUser, messages } = get();
     try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
-      set({ messages: [...messages, res.data], smartReplies: [] });
+      set({ messages: [...messages, res.data], smartReplies: [], isGeneratingReplies: false });
     } catch (error) {
       toast.error(error.response.data.message);
     }
@@ -57,12 +58,13 @@ export const useChatStore = create((set, get) => ({
     socket.off("newMessage");
     socket.off("messageReaction");
     socket.off("messageDeleted");
+    socket.off("smartReplies");
 
     socket.on("newMessage", (newMessage) => {
       const { selectedUser } = get();
       const isFromSelectedUser = newMessage.senderId === selectedUser?._id;
       if (isFromSelectedUser) {
-        set({ messages: [...get().messages, newMessage] });
+        set({ messages: [...get().messages, newMessage], isGeneratingReplies: true });
         axiosInstance.put(`/messages/seen/${newMessage.senderId}`);
       } else {
         // find sender name from users list
@@ -93,8 +95,12 @@ export const useChatStore = create((set, get) => ({
     socket.on("smartReplies", ({ messageId, replies }) => {
       const { messages } = get();
       const lastMsg = messages[messages.length - 1];
-      if (!lastMsg || lastMsg._id === messageId || true)
-        set({ smartReplies: replies });
+      // only show if this is still the latest message in the active chat
+      if (lastMsg && lastMsg._id.toString() === messageId.toString()) {
+        set({ smartReplies: replies, isGeneratingReplies: false });
+      } else {
+        set({ isGeneratingReplies: false });
+      }
     });
   },
 
