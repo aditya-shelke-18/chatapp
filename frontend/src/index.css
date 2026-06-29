@@ -2,4 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: oklch(var(--bc)/0.15); border-radius: 99px; }
 
+/* ── App background gradient ── */
+.chat-bg {
+  background: linear-gradient(135deg, oklch(var(--b2)) 0%, oklch(var(--b3)) 100%);
+  min-height: 100vh;
+}
+
+/* ── Glass card ── */
+.glass-card {
+  background: oklch(var(--b1)/0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid oklch(var(--bc)/0.08);
+  box-shadow: 0 8px 40px oklch(var(--bc)/0.10), 0 1.5px 6px oklch(var(--bc)/0.07);
+}
+
+/* ── Sidebar contact item ── */
+.contact-item {
+  @apply flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-150;
+}
+.contact-item:hover {
+  background: oklch(var(--bc)/0.07);
+}
+.contact-item.active {
+  background: oklch(var(--p)/0.15);
+  border-left: 3px solid oklch(var(--p));
+}
+
+/* ── Message bubbles ── */
+.bubble-sent {
+  background: linear-gradient(135deg, oklch(var(--p)) 0%, oklch(var(--pf)/0.9) 100%);
+  color: oklch(var(--pc));
+  border-radius: 18px 18px 4px 18px;
+  box-shadow: 0 2px 8px oklch(var(--p)/0.25);
+}
+.bubble-received {
+  background: oklch(var(--b2));
+  border: 1px solid oklch(var(--bc)/0.08);
+  border-radius: 18px 18px 18px 4px;
+  box-shadow: 0 2px 6px oklch(var(--bc)/0.07);
+}
+
+/* ── Input area ── */
+.input-area {
+  background: oklch(var(--b1)/0.95);
+  border-top: 1px solid oklch(var(--bc)/0.08);
+  backdrop-filter: blur(10px);
+}
+
+/* ── Online dot pulse ── */
+.online-dot {
+  @apply absolute bottom-0 right-0 size-3 rounded-full bg-success ring-2 ring-base-100;
+  animation: pulse-dot 2s infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(var(--su)/0.5); }
+  50%       { box-shadow: 0 0 0 4px oklch(var(--su)/0); }
+}
+
+/* ── Smart reply badges ── */
+.smart-reply-bar {
+  background: linear-gradient(90deg, oklch(var(--b1)) 0%, oklch(var(--b2)/0.8) 100%);
+  border-top: 1px solid oklch(var(--bc)/0.07);
+}
+
+/* ── No chat selected illustration ── */
+.no-chat-icon {
+  background: linear-gradient(135deg, oklch(var(--p)/0.15), oklch(var(--s)/0.15));
+  border-radius: 28px;
+  padding: 24px;
+}
