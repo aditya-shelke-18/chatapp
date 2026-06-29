@@ -85,8 +85,10 @@ export const sendMessages = async (req, res) => {
     const receiverSocketId = getReceiverSocketId(receiverId);
     if(receiverSocketId){
         io.to(receiverSocketId).emit("newMessage", newMessage);
-        // Generate smart replies only if receiver is online and message has text
-        if (newMessage.text) generateAndEmitSmartReplies(newMessage, receiverSocketId);
+        if (newMessage.text) {
+            generateAndEmitSmartReplies(newMessage, receiverSocketId);
+            translateAndEmit(newMessage, senderId, receiverId, receiverSocketId);
+        }
     }
 
         res.status(201).json(newMessage);
@@ -114,6 +116,58 @@ export const deleteMessage = async (req, res) => {
     } catch (error) {
         console.log("Error in deleteMessage", error.message);
         res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+const translateAndEmit = async (message, senderId, receiverId, receiverSocketId) => {
+    try {
+        if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === "your_openai_api_key_here") return;
+
+        const [sender, receiver] = await Promise.all([
+            User.findById(senderId).select("preferredLanguage"),
+            User.findById(receiverId).select("preferredLanguage"),
+        ]);
+
+        const senderLang = sender?.preferredLanguage || "en";
+        const receiverLang = receiver?.preferredLanguage || "en";
+
+        if (senderLang === receiverLang) return;
+
+        // Check cache first
+        const cached = message.translations?.get(receiverLang);
+        if (cached) {
+            io.to(receiverSocketId).emit("translatedMessage", {
+                messageId: message._id.toString(),
+                language: receiverLang,
+                translatedText: cached,
+            });
+            return;
+        }
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a translation engine. Translate the given text accurately and naturally. Return only the translated text, nothing else." },
+                { role: "user", content: `Translate this message to language code "${receiverLang}": ${message.text}` }
+            ],
+            max_tokens: 300,
+            temperature: 0.3,
+        });
+
+        const translatedText = completion.choices[0].message.content.trim();
+
+        // Cache in DB
+        await Message.findByIdAndUpdate(message._id, {
+            $set: { [`translations.${receiverLang}`]: translatedText }
+        });
+
+        io.to(receiverSocketId).emit("translatedMessage", {
+            messageId: message._id.toString(),
+            language: receiverLang,
+            translatedText,
+        });
+    } catch (error) {
+        console.log("Error in translateAndEmit:", error.message);
     }
 };
 

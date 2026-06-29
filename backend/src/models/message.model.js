@@ -15,6 +15,15 @@ const messageSchema = new mongoose.Schema(
     text: {
         type: String,
     },
+    originalLanguage: {
+        type: String,
+        default: "en",
+    },
+    translations: {
+        type: Map,
+        of: String,
+        default: {},
+    },
     image: {
         type: String,
     },

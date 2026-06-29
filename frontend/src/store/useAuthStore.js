@@ -84,6 +84,16 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  updateLanguage: async (preferredLanguage) => {
+    try {
+      const res = await axiosInstance.put("/auth/update-profile", { preferredLanguage });
+      set({ authUser: res.data });
+      toast.success("Language preference saved");
+    } catch (error) {
+      toast.error(error.response?.data?.message);
+    }
+  },
+
   connectSocket: () => {
     const { authUser } = get();
     if (!authUser || get().socket?.connected) return;

@@ -58,6 +58,7 @@ export const useChatStore = create((set, get) => ({
     socket.off("newMessage");
     socket.off("messageReaction");
     socket.off("messageDeleted");
+    socket.off("translatedMessage");
     socket.off("smartReplies");
 
     socket.on("newMessage", (newMessage) => {
@@ -92,6 +93,16 @@ export const useChatStore = create((set, get) => ({
       set({ messages: get().messages.filter(msg => msg._id !== messageId) });
     });
 
+    socket.on("translatedMessage", ({ messageId, translatedText, language }) => {
+      set({
+        messages: get().messages.map(msg =>
+          msg._id.toString() === messageId
+            ? { ...msg, translatedText, translatedLanguage: language }
+            : msg
+        )
+      });
+    });
+
     socket.on("smartReplies", ({ messageId, replies }) => {
       const { messages } = get();
       const lastMsg = messages[messages.length - 1];
@@ -109,6 +120,7 @@ export const useChatStore = create((set, get) => ({
     socket.off("newMessage");
     socket.off("messageReaction");
     socket.off("messageDeleted");
+    socket.off("translatedMessage");
     socket.off("smartReplies");
   },
 

@@ -96,7 +96,13 @@ const ChatContainer = () => {
                 )}
                 {message.text && (
                   <div className={`px-4 py-2.5 text-sm leading-relaxed ${isMine ? "bubble-sent" : "bubble-received"}`}>
-                    {message.text}
+                    <p>{message.text}</p>
+                    {message.translatedText && (
+                      <div className="mt-1.5 pt-1.5 border-t border-current/10">
+                        <p className="text-[10px] opacity-50 mb-0.5 uppercase tracking-wide">Translated</p>
+                        <p className="opacity-90">{message.translatedText}</p>
+                      </div>
+                    )}
                   </div>
                 )}
 
